@@ -159,6 +159,26 @@ async function syncNow(silent){
   }catch(e){ /* нет сети или ошибка — очередь останется, дошлём позже */ }
   syncing = false; render();
 }
+async function pullFromSheet(){
+  if(!syncCfg.url || syncing) return;
+  syncing = true; render();
+  try{
+    const res = await fetch(syncCfg.url + '?secret=' + encodeURIComponent(syncCfg.secret),
+      { method:'GET', redirect:'follow' });
+    const data = await res.json();
+    if(data.ok && Array.isArray(data.entries)){
+      const localPending = entries.filter(e=>!e.synced);
+      const sheetIds = new Set(data.entries.map(e=>String(e.id)));
+      entries = data.entries.map(e=>({ ...e, synced:true }))
+        .concat(localPending.filter(e=>!sheetIds.has(String(e.id))));
+      persist();
+    } else {
+      setMsg('Ошибка загрузки: ' + (data.error||'неизвестно'));
+    }
+  }catch(e){ setMsg('Нет связи с таблицей'); }
+  syncing = false; render();
+}
+
 function persist(){
   try{ localStorage.setItem(KEY, JSON.stringify(entries)); }
   catch(e){ setMsg('Ошибка сохранения — попробуйте ещё раз'); }
@@ -327,7 +347,8 @@ function render(){
       <button class="save" style="width:100%;border-radius:10px" onclick="saveCfg()">Сохранить и синхронизировать</button>
       <div class="msg" style="margin-top:10px">${syncing?'Синхронизация…':(p?('В очереди записей: '+p):'Все записи отправлены')}</div>
       <button class="csv" onclick="syncNow(false)" ${syncCfg.url?'':'disabled'}>Синхронизировать сейчас</button>
-      <div class="msg" style="text-align:left;margin-top:12px;line-height:1.5">Записи уходят в лист «Журнал» твоей таблицы. Удаление в приложении не удаляет строку в таблице. Локальная копия работает офлайн, очередь досылается при появлении сети.</div>
+      <button class="csv" onclick="pullFromSheet()" ${syncCfg.url?'':'disabled'}>Загрузить из таблицы</button>
+      <div class="msg" style="text-align:left;margin-top:12px;line-height:1.5">Записи уходят в лист «Журнал» твоей таблицы. «Загрузить из таблицы» заменяет локальные данные содержимым Журнала (неотправленные записи сохраняются) — так в телефон приезжают правки и удаления, сделанные в таблице. Офлайн-очередь досылается при появлении сети.</div>
     </div>`;
   }
 
