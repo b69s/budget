@@ -104,9 +104,14 @@
 
 <script>
 const CATS_EXP = ['Жильё','Еда','Транспорт','Связь и интернет','Подписки',
-  'Хобби (плёнка, игры)','Одежда и быт','Здоровье','Накопления (Казахстан 2027)','Разное'];
+  'Хобби (плёнка, игры)','Одежда и быт','Здоровье',
+  'Налог 住民税','Налог 所得税','Пенсия 年金','Страховка 健康保険','Страховка 雇用保険','Кёсай 共済',
+  'Накопления (Казахстан 2027)','Разное'];
 const CATS_INC = ['Зарплата','Подработка','Прочее'];
 const KEY = 'entries-v1';
+const CFG_KEY = 'sync-cfg-v1';
+let syncCfg = {url:'', secret:''};
+let syncing = false;
 
 let entries = [];
 let amount = '';
@@ -122,7 +127,37 @@ function esc(s){ const d=document.createElement('div'); d.textContent=s; return 
 function load(){
   try{ const r = localStorage.getItem(KEY); entries = r ? JSON.parse(r) : []; }
   catch(e){ entries = []; }
+  try{ const c = localStorage.getItem(CFG_KEY); if(c) syncCfg = JSON.parse(c); }
+  catch(e){}
   render();
+  if(navigator.onLine) syncNow(true);
+  window.addEventListener('online', ()=>syncNow(true));
+}
+
+function saveCfg(){
+  syncCfg.url = document.getElementById('cfg-url').value.trim();
+  syncCfg.secret = document.getElementById('cfg-secret').value.trim();
+  localStorage.setItem(CFG_KEY, JSON.stringify(syncCfg));
+  render();
+  syncNow(true);
+}
+
+async function syncNow(silent){
+  if(syncing || !syncCfg.url) { if(!silent) render(); return; }
+  const pending = entries.filter(e=>!e.synced);
+  if(!pending.length){ if(!silent){ render(); } return; }
+  syncing = true; render();
+  try{
+    const res = await fetch(syncCfg.url, { method:'POST', redirect:'follow',
+      body: JSON.stringify({ secret: syncCfg.secret, entries: pending }) });
+    const data = await res.json();
+    if(data.ok && Array.isArray(data.synced)){
+      const ok = new Set(data.synced.map(String));
+      entries.forEach(e=>{ if(ok.has(String(e.id))) e.synced = true; });
+      persist();
+    }
+  }catch(e){ /* нет сети или ошибка — очередь останется, дошлём позже */ }
+  syncing = false; render();
 }
 function persist(){
   try{ localStorage.setItem(KEY, JSON.stringify(entries)); }
@@ -147,8 +182,9 @@ function save(){
   if(!val) return;
   const note = document.getElementById('note')?.value.trim() || '';
   entries.push({ id: Date.now()+''+Math.floor(Math.random()*1000),
-    date: new Date().toISOString().slice(0,10), type, cat, val, note });
+    date: new Date().toISOString().slice(0,10), type, cat, val, note, synced:false });
   persist();
+  syncNow(true);
   amount=''; if(document.getElementById('note')) document.getElementById('note').value='';
   render();
   showStamp();
@@ -199,12 +235,18 @@ function render(){
     <div class="hdr">
       <div class="shop">Enishi · личный бюджет</div>
       <div class="month-total">расходы за ${now.toLocaleDateString('ru-RU',{month:'long'})}: <b>${fmt(spent)}</b></div>
+      ${(()=>{ const p=entries.filter(e=>!e.synced).length;
+        if(!syncCfg.url) return '';
+        if(syncing) return '<div class="shop" style="margin-top:2px">синхронизация…</div>';
+        if(p) return '<div class="shop" style="margin-top:2px;color:var(--hanko)">в очереди: '+p+'</div>';
+        return '<div class="shop" style="margin-top:2px">✓ синхронизировано</div>'; })()}
     </div>
     <hr class="tear">
     <div class="tabs">
       <button class="${tab==='input'?'on':''}" onclick="tab='input';render()">Ввод</button>
       <button class="${tab==='history'?'on':''}" onclick="tab='history';render()">История</button>
       <button class="${tab==='summary'?'on':''}" onclick="tab='summary';render()">Итоги</button>
+      <button class="${tab==='sync'?'on':''}" onclick="tab='sync';render()">Синх</button>
     </div>`;
 
   if(tab==='input'){
@@ -242,7 +284,7 @@ function render(){
         }
         out += `<div class="row">
           <div class="cat">${esc(e.cat)}${e.note?`<small>${esc(e.note)}</small>`:''}</div>
-          <div class="val ${e.type==='inc'?'inc':''}">${e.type==='inc'?'+':'−'}${fmt(e.val)}</div>
+          <div class="val ${e.type==='inc'?'inc':''}">${e.type==='inc'?'+':'−'}${fmt(e.val)}${syncCfg.url?(e.synced?' <small style="color:var(--income)">✓</small>':' <small style="color:var(--hanko)">⌛</small>'):''}</div>
           <button class="del" onclick="delEntry('${e.id}')" aria-label="Удалить">✕</button>
         </div>`;
       }
@@ -274,6 +316,19 @@ function render(){
         <div class="sumrow total"><span>Баланс</span><span class="v">${fmt(inc-expTotal)}</span></div>`;
     }
     html += `<div class="view">${out}</div>`;
+  }
+
+  if(tab==='sync'){
+    const p = entries.filter(e=>!e.synced).length;
+    html += `<div class="view">
+      <div class="day"><span>Google Таблица</span><span>${syncCfg.url?'подключена':'не подключена'}</span></div>
+      <input id="cfg-url" class="note" placeholder="URL Web App (…/exec)" value="${esc(syncCfg.url)}">
+      <input id="cfg-secret" class="note" placeholder="Секретный код" value="${esc(syncCfg.secret)}">
+      <button class="save" style="width:100%;border-radius:10px" onclick="saveCfg()">Сохранить и синхронизировать</button>
+      <div class="msg" style="margin-top:10px">${syncing?'Синхронизация…':(p?('В очереди записей: '+p):'Все записи отправлены')}</div>
+      <button class="csv" onclick="syncNow(false)" ${syncCfg.url?'':'disabled'}>Синхронизировать сейчас</button>
+      <div class="msg" style="text-align:left;margin-top:12px;line-height:1.5">Записи уходят в лист «Журнал» твоей таблицы. Удаление в приложении не удаляет строку в таблице. Локальная копия работает офлайн, очередь досылается при появлении сети.</div>
+    </div>`;
   }
 
   app.innerHTML = html;
