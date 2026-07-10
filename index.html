@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Личный бюджет</title>
+<meta name="theme-color" content="#FAF7F0">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Бюджет">
+<style>
+  html,body{margin:0;padding:0;background:#EDE9DF}
+  body{padding-bottom:env(safe-area-inset-bottom)}
+</style>
+</head>
+<body>
+<!-- Учёт расходов: мобильное приложение в стиле кассового чека -->
+<div id="app"></div>
+<style>
+  :root{
+    --paper:#FAF7F0; --ink:#26221C; --muted:#8A8375; --line:#D8D2C4;
+    --hanko:#B3402A; --income:#2E6B4F; --chip:#EFEAE0;
+    --mono:ui-monospace,'SF Mono','Cascadia Mono','Courier New',monospace;
+    --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+  }
+  #app{max-width:420px;margin:0 auto;background:var(--paper);color:var(--ink);
+    font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;
+    box-shadow:0 0 24px rgba(0,0,0,.06)}
+  .hdr{padding:14px 16px 10px;text-align:center}
+  .hdr .shop{font-family:var(--mono);font-size:12px;letter-spacing:.25em;color:var(--muted);text-transform:uppercase}
+  .hdr .month-total{font-family:var(--mono);font-size:15px;margin-top:4px}
+  .hdr .month-total b{font-size:17px}
+  .tear{border:none;border-top:2px dashed var(--line);margin:0 12px}
+  .tabs{display:flex;margin:10px 12px 0;gap:6px}
+  .tabs button{flex:1;padding:9px 0;background:none;border:1px solid var(--line);
+    border-radius:8px;font-family:var(--mono);font-size:13px;color:var(--muted);cursor:pointer}
+  .tabs button.on{border-color:var(--ink);color:var(--ink);font-weight:700}
+  .view{flex:1;display:flex;flex-direction:column;padding:10px 12px 16px}
+
+  /* --- Ввод --- */
+  .toggle{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:10px}
+  .toggle button{flex:1;padding:10px 0;background:none;border:none;font-family:var(--mono);
+    font-size:14px;color:var(--muted);cursor:pointer}
+  .toggle button.on-exp{background:var(--ink);color:var(--paper);font-weight:700}
+  .toggle button.on-inc{background:var(--income);color:var(--paper);font-weight:700}
+  .amount{font-family:var(--mono);text-align:right;font-size:44px;font-weight:700;
+    padding:6px 10px;letter-spacing:.02em;min-height:60px}
+  .amount .yen{font-size:26px;color:var(--muted);margin-right:4px}
+  .amount.zero{color:var(--line)}
+  .chips{display:flex;gap:6px;overflow-x:auto;padding:2px 0 8px;-webkit-overflow-scrolling:touch}
+  .chips::-webkit-scrollbar{display:none}
+  .chips button{white-space:nowrap;padding:8px 12px;border-radius:16px;border:1px solid var(--line);
+    background:var(--chip);font-size:13px;color:var(--ink);cursor:pointer}
+  .chips button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+  .chips button.on-inc{background:var(--income);color:var(--paper);border-color:var(--income)}
+  .note{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:8px;
+    padding:10px;font-size:14px;font-family:var(--sans);background:#fff;margin-bottom:8px}
+  .note:focus{outline:2px solid var(--ink);outline-offset:-1px}
+  .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:auto}
+  .pad button{padding:15px 0;font-family:var(--mono);font-size:24px;border:1px solid var(--line);
+    border-radius:10px;background:#fff;color:var(--ink);cursor:pointer;touch-action:manipulation}
+  .pad button:active{background:var(--chip)}
+  .save{grid-column:1/-1;background:var(--hanko);color:#fff;border:none;font-size:17px;
+    font-weight:700;font-family:var(--sans);padding:15px 0;border-radius:10px}
+  .save:disabled{background:var(--line)}
+  .msg{font-size:12px;color:var(--muted);text-align:center;min-height:16px;margin-top:6px;font-family:var(--mono)}
+
+  /* --- Штамп --- */
+  .stamp{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;z-index:9}
+  .stamp span{width:110px;height:110px;border:5px solid var(--hanko);border-radius:50%;
+    color:var(--hanko);font-size:52px;display:flex;align-items:center;justify-content:center;
+    font-family:serif;transform:rotate(-12deg);background:rgba(250,247,240,.85);
+    animation:stampIn .5s ease-out forwards}
+  @keyframes stampIn{0%{opacity:0;transform:rotate(-12deg) scale(1.8)}
+    45%{opacity:1;transform:rotate(-12deg) scale(.95)}100%{opacity:0;transform:rotate(-12deg) scale(1)}}
+  @media (prefers-reduced-motion:reduce){.stamp span{animation:none;opacity:0}}
+
+  /* --- История / Итоги --- */
+  .day{font-family:var(--mono);font-size:12px;color:var(--muted);margin:12px 0 4px;
+    display:flex;justify-content:space-between}
+  .row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed var(--line)}
+  .row .cat{flex:1;font-size:14px}
+  .row .cat small{display:block;color:var(--muted);font-size:12px}
+  .row .val{font-family:var(--mono);font-size:15px;font-weight:700}
+  .row .val.inc{color:var(--income)}
+  .row .del{background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:4px 6px}
+  .sumrow{display:flex;justify-content:space-between;padding:7px 0;font-size:14px;
+    border-bottom:1px dashed var(--line)}
+  .sumrow .v{font-family:var(--mono);font-weight:700}
+  .sumrow.total{font-weight:700;border-bottom:2px solid var(--ink)}
+  .bar{height:5px;background:var(--chip);border-radius:3px;margin:3px 0 6px;overflow:hidden}
+  .bar i{display:block;height:100%;background:var(--ink)}
+  .empty{text-align:center;color:var(--muted);font-family:var(--mono);font-size:13px;padding:40px 0}
+  .csv{margin-top:14px;width:100%;padding:11px 0;border:1px solid var(--line);border-radius:8px;
+    background:none;font-family:var(--mono);font-size:13px;color:var(--ink);cursor:pointer}
+  .navmonth{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .navmonth b{font-family:var(--mono);font-size:15px}
+  .navmonth button{background:none;border:1px solid var(--line);border-radius:8px;
+    padding:6px 14px;font-size:15px;cursor:pointer;color:var(--ink)}
+</style>
+
+<script>
+const CATS_EXP = ['Жильё','Еда','Транспорт','Связь и интернет','Подписки',
+  'Хобби (плёнка, игры)','Одежда и быт','Здоровье','Накопления (Казахстан 2027)','Разное'];
+const CATS_INC = ['Зарплата','Подработка','Прочее'];
+const KEY = 'entries-v1';
+
+let entries = [];
+let amount = '';
+let type = 'exp';           // exp | inc
+let cat = CATS_EXP[1];      // Еда по умолчанию
+let tab = 'input';          // input | history | summary
+let sumMonth = monthKey(new Date());
+
+function monthKey(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function fmt(n){ return '¥' + Number(n).toLocaleString('ru-RU'); }
+function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function load(){
+  try{ const r = localStorage.getItem(KEY); entries = r ? JSON.parse(r) : []; }
+  catch(e){ entries = []; }
+  render();
+}
+function persist(){
+  try{ localStorage.setItem(KEY, JSON.stringify(entries)); }
+  catch(e){ setMsg('Ошибка сохранения — попробуйте ещё раз'); }
+}
+
+function setMsg(t){ const m=document.getElementById('msg'); if(m) m.textContent=t; }
+
+function digit(d){
+  if(d==='back'){ amount = amount.slice(0,-1); }
+  else{
+    if(amount.length >= 8) return;
+    if(amount==='' && d==='0') return;
+    if(amount==='' && d==='00') return;
+    amount += d;
+  }
+  render();
+}
+
+function save(){
+  const val = parseInt(amount||'0',10);
+  if(!val) return;
+  const note = document.getElementById('note')?.value.trim() || '';
+  entries.push({ id: Date.now()+''+Math.floor(Math.random()*1000),
+    date: new Date().toISOString().slice(0,10), type, cat, val, note });
+  persist();
+  amount=''; if(document.getElementById('note')) document.getElementById('note').value='';
+  render();
+  showStamp();
+}
+
+function showStamp(){
+  const s = document.createElement('div');
+  s.className='stamp'; s.innerHTML='<span>済</span>';
+  document.body.appendChild(s);
+  setTimeout(()=>s.remove(), 600);
+}
+
+function delEntry(id){
+  entries = entries.filter(e=>e.id!==id);
+  persist(); render();
+}
+
+function setType(t){
+  type=t; cat = (t==='exp'?CATS_EXP:CATS_INC)[t==='exp'?1:0]; render();
+}
+
+function monthEntries(mk){ return entries.filter(e=>e.date.startsWith(mk)); }
+
+function shiftMonth(dir){
+  const [y,m] = sumMonth.split('-').map(Number);
+  const d = new Date(y, m-1+dir, 1);
+  sumMonth = monthKey(d); render();
+}
+
+function copyCSV(){
+  const rows = entries.slice().sort((a,b)=>a.date.localeCompare(b.date))
+    .map(e=>[e.date.split('-').reverse().join('.'), e.type==='exp'?'Расход':'Доход', e.cat, e.val, e.note].join('\t'));
+  const txt = rows.join('\n');
+  if(navigator.clipboard){ navigator.clipboard.writeText(txt)
+    .then(()=>alert('Скопировано — вставьте в лист «Журнал»'))
+    .catch(()=>prompt('Скопируйте вручную:', txt)); }
+  else prompt('Скопируйте вручную:', txt);
+}
+
+function render(){
+  const app = document.getElementById('app');
+  const now = new Date();
+  const curMk = monthKey(now);
+  const cur = monthEntries(curMk);
+  const spent = cur.filter(e=>e.type==='exp').reduce((s,e)=>s+e.val,0);
+
+  let html = `
+    <div class="hdr">
+      <div class="shop">Enishi · личный бюджет</div>
+      <div class="month-total">расходы за ${now.toLocaleDateString('ru-RU',{month:'long'})}: <b>${fmt(spent)}</b></div>
+    </div>
+    <hr class="tear">
+    <div class="tabs">
+      <button class="${tab==='input'?'on':''}" onclick="tab='input';render()">Ввод</button>
+      <button class="${tab==='history'?'on':''}" onclick="tab='history';render()">История</button>
+      <button class="${tab==='summary'?'on':''}" onclick="tab='summary';render()">Итоги</button>
+    </div>`;
+
+  if(tab==='input'){
+    const cats = type==='exp'?CATS_EXP:CATS_INC;
+    html += `<div class="view">
+      <div class="toggle">
+        <button class="${type==='exp'?'on-exp':''}" onclick="setType('exp')">− Расход</button>
+        <button class="${type==='inc'?'on-inc':''}" onclick="setType('inc')">+ Доход</button>
+      </div>
+      <div class="amount ${amount?'':'zero'}"><span class="yen">¥</span>${amount?Number(amount).toLocaleString('ru-RU'):'0'}</div>
+      <div class="chips">${cats.map(c=>
+        `<button class="${c===cat?(type==='inc'?'on-inc on':'on'):''}" onclick="cat='${c.replace(/'/g,"\\'")}';render()">${esc(c)}</button>`).join('')}
+      </div>
+      <input id="note" class="note" placeholder="Комментарий (необязательно)" maxlength="60">
+      <div class="pad">
+        ${['1','2','3','4','5','6','7','8','9','00','0'].map(d=>
+          `<button onclick="digit('${d}')">${d}</button>`).join('')}
+        <button onclick="digit('back')" aria-label="Стереть">⌫</button>
+        <button class="save" onclick="save()" ${amount?'':'disabled'}>Записать</button>
+      </div>
+      <div id="msg" class="msg"></div>
+    </div>`;
+  }
+
+  if(tab==='history'){
+    const sorted = entries.slice().sort((a,b)=>b.date.localeCompare(a.date)||b.id.localeCompare(a.id));
+    if(!sorted.length){ html += `<div class="view"><div class="empty">Записей пока нет.<br>Добавьте первую на вкладке «Ввод».</div></div>`; }
+    else{
+      let out='', lastDay='';
+      for(const e of sorted){
+        if(e.date!==lastDay){
+          lastDay=e.date;
+          const dayExp = sorted.filter(x=>x.date===e.date&&x.type==='exp').reduce((s,x)=>s+x.val,0);
+          out += `<div class="day"><span>${e.date.split('-').reverse().join('.')}</span><span>−${fmt(dayExp)}</span></div>`;
+        }
+        out += `<div class="row">
+          <div class="cat">${esc(e.cat)}${e.note?`<small>${esc(e.note)}</small>`:''}</div>
+          <div class="val ${e.type==='inc'?'inc':''}">${e.type==='inc'?'+':'−'}${fmt(e.val)}</div>
+          <button class="del" onclick="delEntry('${e.id}')" aria-label="Удалить">✕</button>
+        </div>`;
+      }
+      out += `<button class="csv" onclick="copyCSV()">Копировать всё как CSV для таблицы</button>`;
+      html += `<div class="view">${out}</div>`;
+    }
+  }
+
+  if(tab==='summary'){
+    const me = monthEntries(sumMonth);
+    const exp = me.filter(e=>e.type==='exp');
+    const inc = me.filter(e=>e.type==='inc').reduce((s,e)=>s+e.val,0);
+    const expTotal = exp.reduce((s,e)=>s+e.val,0);
+    const byCat = {};
+    exp.forEach(e=>byCat[e.cat]=(byCat[e.cat]||0)+e.val);
+    const max = Math.max(1,...Object.values(byCat));
+    const [y,m] = sumMonth.split('-');
+    const mName = new Date(y, m-1, 1).toLocaleDateString('ru-RU',{month:'long',year:'numeric'});
+    let out = `<div class="navmonth">
+      <button onclick="shiftMonth(-1)">‹</button><b>${mName}</b><button onclick="shiftMonth(1)">›</button>
+    </div>`;
+    if(!me.length) out += `<div class="empty">За этот месяц записей нет</div>`;
+    else{
+      out += Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([c,v])=>
+        `<div class="sumrow"><span>${esc(c)}</span><span class="v">${fmt(v)}</span></div>
+         <div class="bar"><i style="width:${Math.round(v/max*100)}%"></i></div>`).join('');
+      out += `<div class="sumrow"><span>Доходы</span><span class="v" style="color:var(--income)">+${fmt(inc)}</span></div>
+        <div class="sumrow"><span>Расходы</span><span class="v">−${fmt(expTotal)}</span></div>
+        <div class="sumrow total"><span>Баланс</span><span class="v">${fmt(inc-expTotal)}</span></div>`;
+    }
+    html += `<div class="view">${out}</div>`;
+  }
+
+  app.innerHTML = html;
+}
+
+load();
+</script>
+
+<script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
